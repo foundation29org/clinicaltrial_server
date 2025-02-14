@@ -32,7 +32,7 @@ function createModels(projectName) {
 
   const gpt4o = new ChatOpenAI({
     modelName: "gpt-4o",
-    azureOpenAIApiKey: "f53421a15b3c439a8840773d3ec34005",
+    azureOpenAIApiKey: config.OPENAI_API_KEY,
     azureOpenAIApiVersion: config.OPENAI_API_VERSION,
     azureOpenAIApiInstanceName: config.OPENAI_API_BASE,
     azureOpenAIApiDeploymentName: "gpt-4o",
