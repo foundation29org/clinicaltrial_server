@@ -29,6 +29,19 @@ function createModels(projectName) {
     projectName: projectName,
     client
   });
+
+  const gpt4o = new ChatOpenAI({
+    modelName: "gpt-4o",
+    azureOpenAIApiKey: "f53421a15b3c439a8840773d3ec34005",
+    azureOpenAIApiVersion: config.OPENAI_API_VERSION,
+    azureOpenAIApiInstanceName: config.OPENAI_API_BASE,
+    azureOpenAIApiDeploymentName: "gpt-4o",
+    temperature: 0,
+    timeout: 500000,
+    callbacks: [tracer]
+  });
+
+  // console.log(gpt4o);
   
   const azuregpt4 = new ChatOpenAI({
     modelName: "gpt-4-0613",
@@ -94,7 +107,7 @@ function createModels(projectName) {
     callbacks: [tracer],
   });
   
-  return { azuregpt4, azure32k, claude2, model128k, azuregpt4mini, azuregpt4o };
+  return { gpt4o, azuregpt4, azure32k, claude2, model128k, azuregpt4mini, azuregpt4o };
 }
 
 function extractAndParse(summaryText) {
@@ -181,7 +194,7 @@ function createHtmlTemplate(htmlContent, jsonContent) {
   }
 
   // Step 3: Return the new htmlContent
-  console.log(htmlContent);
+  // console.log(htmlContent);
 
   return [htmlContent, jsonObject.pathogenic_variants_list];
 }
@@ -456,6 +469,7 @@ async function navigator_summarize(userId, question, context, timeline, gene){
   
       const chatPrompt = ChatPromptTemplate.fromMessages([systemMessagePrompt, humanMessagePrompt]);
   
+      // Aquí es donde hace la llamada  
       const chain = new LLMChain({
         prompt: chatPrompt,
         llm: azuregpt4o,
@@ -1127,6 +1141,7 @@ async function combine_categorized_docs(userId, context){
 }
 
 async function translateSummary(lang, text) {
+  /* @note: The name 'translateSummary' is too specific, as this function is now used to translate various types of content, not just summaries. Consider renaming to something more generic like 'translate' or 'translateText' to better reflect its current usage. */
   return new Promise(async function (resolve, reject) {
     try {
       // Create the models
@@ -1192,12 +1207,158 @@ async function translateSummary(lang, text) {
   });
 }
 
+// Extract key events (conditions, otherTerms, treatments, locations) from the recognized file content
+async function extract_report_events(userId, documentText, detectedLanguage) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const projectName = `EVENTS - ${config.LANGSMITH_PROJECT} - ${userId}`; // or any name specific to event extraction
+      let { gpt4o } = createModels(projectName); // selects the azuregpt4o property from the array
+
+      const systemMessagePrompt = SystemMessagePromptTemplate.fromTemplate(
+        `You are an assistant that extracts clinical events from text. 
+        The text is in language: "${detectedLanguage}".
+
+        Please identify:
+        - Conditions/Diseases
+        - Interventions/Treatments (including procedures, medications)
+        - Locations (places where treatment or tests occurred)
+        - Any other clinically relevant terms if applicable
+
+        Return the result as valid JSON with the following structure:
+        {{
+          "conditions": [],
+          "otherTerms": [],
+          "treatments": [],
+          "locations": []
+        }}
+
+        **Instructions**:
+        1. "conditions" may include any diagnoses, diseases, suspected conditions, or relevant pathologies.
+        2. "otherTerms": any key information like genes, methodologies, etc., that does not fit the above categories.
+        3. "treatments" may include medications, interventions, procedures, or recommended monitoring.
+        4. "locations" may be addresses of facilities, specific labs, clinics, or hospitals (make sure they DO NOT repeat)
+
+        Please:
+        - Respond **only** with valid JSON (no extra text or explanations).
+        - Do not add escape characters (like \\n) inside JSON.
+        - Do not output any additional text outside the JSON object.
+        - If some fields are not found, return them as empty.`
+      );
+
+      const humanMessagePrompt = HumanMessagePromptTemplate.fromTemplate(
+        `Text to analyze:
+        """{documentText}"""`
+      );
+
+      const chatPrompt = ChatPromptTemplate.fromMessages([systemMessagePrompt, humanMessagePrompt]);
+
+      const chain = new LLMChain({
+        prompt: chatPrompt,
+        llm: gpt4o,
+      });
+
+      const chain_retry = chain.withRetry({
+        stopAfterAttempt: 3,
+      });
+
+      const response = await chain_retry.invoke({
+        documentText: documentText,
+      });
+
+      let extractedEvents;
+      try {
+        extractedEvents = JSON.parse(response.text);
+      } catch (parseErr) {
+        console.error("Error parsing LLM JSON:", parseErr);
+        extractedEvents = {
+          conditions: [],
+          otherTerms: [],
+          treatments: [],
+          locations: []
+        };
+      }
+
+      resolve(extractedEvents);
+
+    } catch (error) {
+      console.error("Error in extract_report_events:", error);
+      reject(error);
+    }
+  });
+}
+
+
+
+async function extract_inclusion_exclusion_criteria(userId, criteriaText, detectedLanguage) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const projectName = `CRITERIA-INC-EXC - ${config.LANGSMITH_PROJECT} - ${userId}`;
+      let { gpt4o } = createModels(projectName);
+
+      const systemMessagePrompt = SystemMessagePromptTemplate.fromTemplate(
+        `Eres un asistente que analiza y separa criterios de elegibilidad clínica en dos categorías: inclusión y exclusión.
+        El texto que recibirás está en el idioma: "${detectedLanguage}".
+        
+        **Instrucciones**:
+        - Devuelve como salida **únicamente** un JSON válido con dos arrays: inclusion y exclusion
+        - "inclusion": array de cadenas con cada criterio de inclusión
+        - "exclusion": array de cadenas con cada criterio de exclusión
+        - No incluyas más texto, ni explicaciones
+        - No añadas claves diferentes a inclusion y exclusion
+        - Encuentra siempre la forma de convertir los criterios en una lista coherente
+        
+        IMPORTANTE : Asegúrate de que el formato JSON es correcto, procesable por un script.
+        
+        Formato esperado: Un objeto JSON con dos propiedades (inclusion y exclusion), cada una conteniendo un array de strings.`
+      );
+
+      const humanMessagePrompt = HumanMessagePromptTemplate.fromTemplate(
+        `Texto de criterios:
+        """{criteriaText}"""
+        `
+      );
+
+      const chatPrompt = ChatPromptTemplate.fromMessages([
+        systemMessagePrompt,
+        humanMessagePrompt
+      ]);
+
+      const chain = new LLMChain({
+        prompt: chatPrompt,
+        llm: gpt4o,
+      });
+
+      const chain_retry = chain.withRetry({ stopAfterAttempt: 3 });
+
+      const response = await chain_retry.invoke({ criteriaText });
+
+      let extracted;
+      try {
+        extracted = JSON.parse(response.text);
+      } catch (parseErr) {
+        console.error("Error parsing JSON de LLM en extract_inclusion_exclusion_criteria:", parseErr);
+        extracted = {
+          inclusion: [],
+          exclusion: []
+        };
+      }
+
+      resolve(extracted);
+    } catch (error) {
+      console.error("Error en extract_inclusion_exclusion_criteria:", error);
+      reject(error);
+    }
+  });
+}
+
 module.exports = {
-  navigator_chat,
-  navigator_summarize,
-  navigator_summarizeTranscript,
-  navigator_summarize_dx,
-  categorize_docs,
-  combine_categorized_docs,
-  translateSummary
+    navigator_chat,
+    navigator_summarize,
+    navigator_summarizeTranscript,
+    navigator_summarize_dx,
+    categorize_docs,
+    combine_categorized_docs,
+    translateSummary,
+  extract_report_events,
+  extract_inclusion_exclusion_criteria
 };
