@@ -1,5 +1,5 @@
 // file that contains the routes of the api
-'use strict'
+'use strict' // ayuda evitar errores de sintaxis
 
 const express = require('express')
 
@@ -11,21 +11,26 @@ const docsCtrl = require('../controllers/user/patient/documents')
 const cors = require('cors');
 const serviceEmail = require('../services/email')
 
+//
+
 const api = express.Router()
 const config= require('../config')
 const myApiKey = config.Server_Key;
 // Lista de dominios permitidos
 const whitelist = config.allowedOrigins;
 
+// tab to impreove readibility
   // Middleware personalizado para CORS
   function corsWithOptions(req, res, next) {
     const corsOptions = {
       origin: function (origin, callback) {
-        console.log(origin);
+        // Registramos el origen de la petición para debugging
+        console.log('Origin of request:', origin);
         if (whitelist.includes(origin)) {
           callback(null, true);
         } else {
             // La IP del cliente
+            // Si no está permitido, capturamos info de la petición
             const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
             const requestInfo = {
                 method: req.method,
@@ -43,10 +48,12 @@ const whitelist = config.allowedOrigins;
       },
     };
   
-    cors(corsOptions)(req, res, next);
+    cors(corsOptions)(req, res, next); // devuelve otro middleware
+    // se llama inmediatamente para ejecutarlo
   }
 
   const checkApiKey = (req, res, next) => {
+    // Verifica que exista API Key válida en el encabezado x-api-key
     // Permitir explícitamente solicitudes de tipo OPTIONS para el "preflight" de CORS
     if (req.method === 'OPTIONS') {
       return next();
@@ -62,13 +69,16 @@ const whitelist = config.allowedOrigins;
 
 // lang routes, using the controller lang, this controller has methods
 api.get('/langs/',  langCtrl.getLangs)
-
-
 // documentsCtrl routes, using the controller documents, this controller has methods
+api.post('/callTrialMatcher', corsWithOptions, checkApiKey, docsCtrl.getTrialMatchesFromFile) // upload file to azure blob
+api.post("/trialEligibility", corsWithOptions, checkApiKey, docsCtrl.getInclusionExclusionFromCriteria); // structure for criteria
+// 2-part checkbox search test ############
+api.post('/extractEventsFromFile', corsWithOptions, checkApiKey, docsCtrl.extractEventsFromFile); // extract events from file
+api.post('/searchTrials', corsWithOptions, checkApiKey, docsCtrl.searchTrials); // search trials
 
-api.post('/upload', corsWithOptions, checkApiKey, docsCtrl.uploadFile)
-api.post('/callnavigator', corsWithOptions, checkApiKey, bookServiceCtrl2.callNavigator)
-api.post('/callsummary', corsWithOptions, checkApiKey, bookServiceCtrl2.callSummary)
+  api.post('/callnavigator', corsWithOptions, checkApiKey, bookServiceCtrl2.callNavigator)
+  api.post('/callsummary', corsWithOptions, checkApiKey, bookServiceCtrl2.callSummary)
+  // resumen de informaciones genéticas
 
 //translations
 api.post('/getDetectLanguage', corsWithOptions, checkApiKey, translationCtrl.getDetectLanguage)
@@ -78,8 +88,6 @@ api.post('/translationinvertarray', corsWithOptions, checkApiKey, translationCtr
 api.post('/deepltranslationinvert', corsWithOptions, checkApiKey, translationCtrl.getdeeplTranslationDictionaryInvert)
 api.post('/translation/segments', corsWithOptions, checkApiKey, translationCtrl.getTranslationSegments)
 api.post('/translation/ia', corsWithOptions, checkApiKey, translationCtrl.getTranslationIA)
-
-
 
 //ruta privada
 api.get('/private', (req, res) => {

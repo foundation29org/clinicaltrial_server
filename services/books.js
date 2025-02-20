@@ -84,6 +84,9 @@ async function callSummary(req, res) {
 
 	// var result = await langchain.navigator_summarize(req.body.userId, promt, req.body.conversation, req.body.context);
 
+	// Executes twice
+	// First: extracts summary (prompt)
+	// Second: extract timeline (prompt2)
 	let promises = [
 		langchain.navigator_summarize(req.body.userId, prompt, req.body.context, false, true),
 		langchain.navigator_summarize(req.body.userId, prompt2, req.body.context, true, false)
@@ -157,8 +160,10 @@ async function azureFuncSummary(req, prompt, timeline, gene){
 }
 
 async function form_recognizer(userId, documentId, containerName, url) {
+	// Toma un archivo almacenado en Azure Blob Storage y lo envía a Form Recognizer para extraer el texto
+
 	return new Promise(async function (resolve, reject) {
-		var url2 = "https://" + accountname + ".blob.core.windows.net/" + containerName + "/" + url + sas;
+		var url2 = "https://" + accountname + ".blob.core.windows.net/" + containerName + "/" + url + sas; // URL del archivo en Azure Blob Storage para acceder a él
 		const modelId = "prebuilt-layout"; // replace with your model id
 		const endpoint = form_recognizer_endpoint; // replace with your endpoint
 		const apiVersion = "2023-10-31-preview";
@@ -211,8 +216,183 @@ async function form_recognizer(userId, documentId, containerName, url) {
 	);
   }
 
+/**
+ * Extract key events (conditions, diseases, treatments, locations, ...) from the recognized file content
+ * @param {string} documentText - the text extracted by 'form_recognizer' at document.js
+ * @param {string} detectedLanguage - lang (eg., "en", "es") 
+ * @returns {Promise<Object>} - array with the events
+ */
+async function extractEvents(documentText, detectedLanguage) {
+  try {
+	console.log("SYS: detectedLanguage:", detectedLanguage);
+    return await langchain.extract_report_events( // resolves the promise
+      'system', // Default system userId
+      documentText,
+      detectedLanguage
+    );
+  } catch (error) {
+    throw error; // reject the promise
+  }
+}
+
+/**
+ * Extrae los criterios de inclusión y exclusión usando LLM
+ * @param {string} criteriaText - Texto completo con "eligibility criteria" o "participation criteria".
+ * @param {string} detectedLanguage - Idioma detectado (ej: 'en', 'es') 
+ * @returns {Promise<Object>} 
+ *   {
+ *     inclusion: [],
+ *     exclusion: []
+ *   }
+ */
+async function extractInclusionExclusion(criteriaText, detectedLanguage) {
+	try {
+	  return await langchain.extract_inclusion_exclusion_criteria(
+		'system', // userId por defecto o lo que prefieras
+		criteriaText,
+		detectedLanguage
+	  );
+	} catch (error) {
+	  throw error;
+	}
+  }
+
+
+/**
+ * Constructs a ClinicalTrials.gov API request URL based on the provided events.
+ *
+ * The mapping from event keys to API query parameters is as follows:
+ *   - conditions  -> query.cond
+ *   - otherTerms  -> query.term
+ *   - treatments  -> query.intr
+ *   - locations   -> query.locn
+ *
+ * @param {Object} events - Object containing arrays of search terms.
+ * @param {string[]} events.conditions - Array of medical conditions.
+ * @param {string[]} events.otherTerms - Array of additional medical terms.
+ * @param {string[]} events.treatments - Array of treatments/interventions.
+ * @param {string[]} events.locations - Array of trial locations.
+ * @returns {string} - The full API request URL.
+ */
+function buildClinicalTrialsURL(events) {
+	const baseUrl = "https://clinicaltrials.gov/api/v2/studies";
+  
+	// Define the mapping between our event keys and the API query parameter names
+	const searchCriteria = [
+	  { field: "conditions", param: "query.cond" },
+	  { field: "otherTerms", param: "query.term" },
+	  { field: "treatments", param: "query.intr" },
+	];
+  
+	// Use URLSearchParams to handle URL encoding of parameters
+	const params = new URLSearchParams();
+  
+	// For each search criteria, if the events object has values, add them as query parameters.
+	searchCriteria.forEach(({ field, param }) => {
+	  if (Array.isArray(events[field]) && events[field].length > 0) {
+		// Join multiple values with " OR " (as per the API's expected format)
+		const value = events[field].join(" OR ");
+		params.append(param, value);
+	  }
+	});
+  
+	// Construct and return the final URL
+	return `${baseUrl}?${params.toString()}`;
+  }
+  
+
+/**
+ * Obtiene y procesa ensayos clínicos de ClinicalTrials.gov basándose en "events".
+ *
+ * @param {Object} events - Objeto con arrays de búsqueda.
+ * @param {string} language - Código del idioma para traducir los resultados (ej. 'en' o 'es').
+ * @returns {Promise<Array<Object>>} - Array de ensayos clínicos traducidos.
+ */
+async function getClinicalTrials(events, language) {
+	if (!language) throw new Error("El parámetro 'language' es obligatorio.");
+	if (!events || !Object.values(events).some(arr => Array.isArray(arr) && arr.length > 0)) {
+	  console.log("No se proporcionaron parámetros de búsqueda.");
+	  return [];
+	}
+  
+	const requestUrl = buildClinicalTrialsURL(events);
+	// https://clinicaltrials.gov/api/v2/studies?query.cond=Malaltia+de+Wilson+OR+distrofia+de+cons&query.term=CRB1+OR+ABCA4+OR+heterozigosi+OR+patosg%C3%A8nica+OR+probablement+patosg%C3%A8nica+OR+VUS+OR+HGVS+OR+ACMG+OR+OMIM+OR+Human+Gene+Mutation+Database+%28HGMD%29+OR+GeneTest.org+OR+Online+Mendelian+Inheritance+in+Man+%28OMIM%29+OR+SIFT+OR+PolyPhen2+OR+MutationTaster+OR+CNVs+OR+exomeDepth+OR+FastQC+OR+cutadapt+OR+BWA+OR+BEDtools+OR+Picard+OR+SAMtools+OR+GATK+OR+FreeBayes+OR+VarScan+OR+SnpEff+OR+1000+Genomes+OR+dbSnp+OR+ExAc+OR+clinvar&query.intr=monitoritzaci%C3%B3+tractament+OR+Seq%C3%BCenciaci%C3%B3+de+6713+gens+OR+validaci%C3%B3+per+Sanger+OR+analisi+de+progenitors+OR+assessorament+gen%C3%A8tic&query.locn=Sant+Joan+de+D%C3%A9u+Barcelona+%C2%B7+Hospital+OR+Esplugues+OR+Servei+de+Medicina+Genetica+i+Molecular+Hospital+Sant+Joan+de+D%C3%A9u+OR+Pg.+Sant+Joan+de+D%C3%A9u+2%2C+planta+0+08950+.-+Esplugues+%28Barcelona%29
+	console.log("SYS: requestUrl:", requestUrl);
+  
+	try {
+	  const response = await axios.get(requestUrl);
+	  const studies = response?.data?.studies || []; // from seeing the devtools
+  
+	  // Mapeo sencillo de los estudios para extraer algunos campos
+	  const trials = studies.map(study => {
+		const ps = study.protocolSection || {};
+		// console.log("SYS: ps:", JSON.stringify(ps, null, 2)); //// visualizar "res"
+		if (ps.contactsLocationsModule?.locations?.length > 0) {
+			// PRINT THE LOCATIONS object to string
+			console.log("SYS: ps.contactsLocationsModule.locations:", JSON.stringify(ps.contactsLocationsModule.locations, null, 2));
+		}
+
+		return {
+		  NCTId: ps.identificationModule?.nctId || "",
+		  BriefTitle: ps.identificationModule?.briefTitle || "",
+		  Organization: ps.identificationModule?.organization?.fullName || "",
+		  LocationFacility: ps.contactsLocationsModule?.locations?.[0]?.facility || "",
+		  OverallStatus: ps.statusModule?.overallStatus || "",
+		  BriefSummary: ps.descriptionModule?.briefSummary || "",
+		  Condition: ps.conditionsModule?.conditions?.[0] || "",
+		  InterventionName: ps.armsInterventionsModule?.interventions?.[0]?.name || "",
+		  Locations: ps.contactsLocationsModule?.locations || [],
+		  ParticipationCriteria: ps.eligibilityModule?.eligibilityCriteria || "",
+		  StudyLink: `https://clinicaltrials.gov/study/${ps.identificationModule?.nctId || ""}`
+		};
+	  });
+
+	  return trials;
+
+	  // return await translateClinicalTrials(trials, language); // todo
+  
+	} catch (error) {
+	  console.error("Error al obtener los ensayos clínicos:", error);
+	  throw new Error(`Error en la petición: ${error.message}. URL: ${requestUrl}`);
+	}
+  }
+
+async function translateClinicalTrials(trials, language) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      if (!trials || trials.length === 0 || !language) {
+        resolve(trials);
+        return;
+      }
+
+      const translatedTrials = await Promise.all(trials.map(async (trial) => {
+        const translatedTrial = { ...trial };
+        const fieldsToTranslate = ['BriefTitle', 'Condition', 'InterventionName'];
+
+        for (const field of fieldsToTranslate) {
+          if (trial[field]) {
+            const translation = await langchain.translateSummary(language, trial[field]);
+            translatedTrial[field] = translation.text;
+          }
+        }
+        return translatedTrial;
+      }));
+
+      resolve(translatedTrials);
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
 module.exports = {
 	callNavigator,
 	callSummary,
 	form_recognizer,
-}
+  extractEvents,
+  getClinicalTrials,
+  extractInclusionExclusion
+};
+
+
+
