@@ -7,7 +7,31 @@ const insights = require('../services/insights')
 const deeplApiKey = config.DEEPL_API_KEY;
 const langchain = require('../services/langchain')
 
-function getDetectLanguage(req, res) {
+function getDetectLanguage(data) {
+    var jsonText = [{ "text": data }];
+    var translationKey = config.translationKey;
+    request.post({ url: 'https://api.cognitive.microsofttranslator.com/detect?api-version=3.0', json: true, headers: { 'Ocp-Apim-Subscription-Key': translationKey, 'Ocp-Apim-Subscription-Region': 'northeurope' }, body: jsonText }, (error, response, body) => {
+      if (error) {
+        console.error(error)
+        insights.error(error);
+        return null
+      }
+      if (body == 'Missing authentication token.') {
+        return null
+      } else {
+        console.log(body)
+        if (body[0].language) {
+          return body[0].language
+        } else {
+          return null
+        }
+
+      }
+  
+    });
+  }
+
+  function getDetectLanguage2(req, res) {
     var jsonText = req.body;
     var translationKey = config.translationKey;
     request.post({ url: 'https://api.cognitive.microsofttranslator.com/detect?api-version=3.0', json: true, headers: { 'Ocp-Apim-Subscription-Key': translationKey, 'Ocp-Apim-Subscription-Region': 'northeurope' }, body: jsonText }, (error, response, body) => {
