@@ -224,6 +224,7 @@ async function form_recognizer(userId, documentId, containerName, url) {
  */
 async function extractEvents(documentText, detectedLanguage) {
   try {
+	console.log("SYS: detectedLanguage:", detectedLanguage);
     return await langchain.extract_report_events( // resolves the promise
       'system', // Default system userId
       documentText,
@@ -281,7 +282,6 @@ function buildClinicalTrialsURL(events) {
 	  { field: "conditions", param: "query.cond" },
 	  { field: "otherTerms", param: "query.term" },
 	  { field: "treatments", param: "query.intr" },
-	  { field: "locations", param: "query.locn" }
 	];
   
 	// Use URLSearchParams to handle URL encoding of parameters

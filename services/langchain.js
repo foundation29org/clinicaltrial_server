@@ -1220,23 +1220,25 @@ async function extract_report_events(userId, documentText, detectedLanguage) {
 
         Please identify:
         - Conditions/Diseases
-        - Interventions/Treatments (including procedures, medications)
-        - Locations (places where treatment or tests occurred)
         - Any other clinically relevant terms if applicable
-
+        - Interventions/Treatments (including procedures, medications)
+        
         Return the result as valid JSON with the following structure:
         {{
           "conditions": [],
           "otherTerms": [],
           "treatments": [],
-          "locations": []
         }}
 
         **Instructions**:
         1. "conditions" may include any diagnoses, diseases, suspected conditions, or relevant pathologies.
         2. "otherTerms": any key information like genes, methodologies, etc., that does not fit the above categories.
         3. "treatments" may include medications, interventions, procedures, or recommended monitoring.
-        4. "locations" may be addresses of facilities, specific labs, clinics, or hospitals (make sure they DO NOT repeat)
+
+        Format the items as follows:
+        - Limit the number of items in each array to 10.
+        - Capitalize the first letter of each item.
+        - Write items in english.
 
         Please:
         - Respond **only** with valid JSON (no extra text or explanations).
@@ -1267,6 +1269,10 @@ async function extract_report_events(userId, documentText, detectedLanguage) {
 
       let extractedEvents;
       try {
+        
+        console.log("SYS: response.text:", response.text);
+        console.log("SYS: detectedLanguage:", detectedLanguage);
+
         extractedEvents = JSON.parse(response.text);
       } catch (parseErr) {
         console.error("Error parsing LLM JSON:", parseErr);
@@ -1274,7 +1280,6 @@ async function extract_report_events(userId, documentText, detectedLanguage) {
           conditions: [],
           otherTerms: [],
           treatments: [],
-          locations: []
         };
       }
 
@@ -1308,6 +1313,19 @@ async function extract_inclusion_exclusion_criteria(userId, criteriaText, detect
         - Encuentra siempre la forma de convertir los criterios en una lista coherente
         
         IMPORTANTE : Asegúrate de que el formato JSON es correcto, procesable por un script.
+
+        // ejemplo :todo
+        Do not include any extra properties beyond these two keys. Your output must be valid JSON (no XML tags, no extra text).
+        {{
+          "inclusion": [
+            "criterio1",
+            "criterio2"
+          ],
+          "exclusion": [
+            "criterio1",
+            "criterio2"
+          ]
+      }}
         
         Formato esperado: Un objeto JSON con dos propiedades (inclusion y exclusion), cada una conteniendo un array de strings.`
       );

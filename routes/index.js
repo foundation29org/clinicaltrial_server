@@ -72,7 +72,9 @@ api.get('/langs/',  langCtrl.getLangs)
 // documentsCtrl routes, using the controller documents, this controller has methods
 api.post('/callTrialMatcher', corsWithOptions, checkApiKey, docsCtrl.getTrialMatchesFromFile) // upload file to azure blob
 api.post("/trialEligibility", corsWithOptions, checkApiKey, docsCtrl.getInclusionExclusionFromCriteria); // structure for criteria
-
+// 2-part checkbox search test ############
+api.post('/extractEventsFromFile', corsWithOptions, checkApiKey, docsCtrl.extractEventsFromFile); // extract events from file
+api.post('/searchTrials', corsWithOptions, checkApiKey, docsCtrl.searchTrials); // search trials
 
   api.post('/callnavigator', corsWithOptions, checkApiKey, bookServiceCtrl2.callNavigator)
   api.post('/callsummary', corsWithOptions, checkApiKey, bookServiceCtrl2.callSummary)
